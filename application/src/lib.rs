@@ -9,20 +9,20 @@ use wasmer::*;
 use wasmer_wasi::{WasiEnv, WasiState};
 use std::path::Path;
 
-#[derive(Clone, WasmerEnv)]
+#[derive(Debug, Clone, WasmerEnv)]
 pub struct HostMemory {
-    inner: Memory,
+    _memory: Memory,
 }
 
-fn host_memory(env: &HostMemory) -> u32 {
-    env.inner.data_ptr() as _
+fn host_memory(_env: &HostMemory) -> WasmPtr<u8, Array> {
+    WasmPtr::new(MEMORY_START as _)
 }
 
 pub struct ModuleInfo {
     instance: Instance,
     plugin: Plugin,
     memory: Memory,
-    run_func: NativeFunc<(u32, WasmPtr<u32>, u32), WasmPtr<u8, Array>>,
+    run_func: NativeFunc<(u32, WasmPtr<u8, Array>, u32), WasmPtr<u8, Array>>,
 }
 
 pub struct WasiEngine {
@@ -54,7 +54,7 @@ impl WasiEngine {
         let import_object = wasmer_wasi::generate_import_object_from_env(&self.store, wasi_env, wasi_version);
 
         let memory = HostMemory {
-            inner: self.memory.clone(),
+            _memory: self.memory.clone(),
         };
         let plugin_import_object = imports! {
             "env" => {
@@ -84,15 +84,14 @@ impl WasiEngine {
     }
 
     pub fn run(&self, data: &[u8]) -> Result<Option<String>, Error> {
-        let mem = self.memory.view::<u8>();
-        let memory_end = MEMORY_START + data.len();
-        for (idx, cell) in mem[MEMORY_START..memory_end].iter().enumerate() {
+        let addr: WasmPtr<u8, Array> = WasmPtr::new(MEMORY_START as _);
+        let mem = addr.deref(&self.memory, 0, data.len() as _).ok_or_else(|| Error::InvalidOffset)?;
+        for (idx, cell) in mem.iter().enumerate() {
             cell.set(data[idx]);
         }
-        let data_ptr = WasmPtr::new(MEMORY_START as _);
         let data_len = data.len() as u32;
         for module in self.modules.iter() {
-            let addr = module.run_func.call(module.plugin.address.into(), data_ptr.into(), data_len.into())?;
+            let addr = module.run_func.call(module.plugin.address.into(), addr.into(), data_len.into())?;
             let r: Option<String> = read(&module.memory, addr)?;
             if r.is_some() {
                 return Ok(r);
