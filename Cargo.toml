@@ -1,0 +1,9 @@
+[workspace]
+members = [
+    "application",
+    "common",
+    "plugin",
+]
+
+[profile.dev]
+split-debuginfo = "unpacked"
